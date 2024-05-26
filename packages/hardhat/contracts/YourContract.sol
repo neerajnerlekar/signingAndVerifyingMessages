@@ -13,75 +13,77 @@ import "hardhat/console.sol";
  * @author BuidlGuidl
  */
 contract YourContract {
-	// State Variables
-	address public immutable owner;
-	string public greeting = "Building Unstoppable Apps!!!";
-	bool public premium = false;
-	uint256 public totalCounter = 0;
-	mapping(address => uint) public userGreetingCounter;
+	function verify(
+		address _signer,
+		address _to,
+		uint256 _amount,
+		string memory _message,
+		uint256 _nonce,
+		bytes memory signature
+	) public pure returns (bool) {
+		bytes32 messageHash = getMessageHash(_to, _amount, _message, _nonce);
+		bytes32 ethSignedMessageHash = getEthSignedMessageHash(messageHash);
 
-	// Events: a way to emit log statements from smart contract that can be listened to by external parties
-	event GreetingChange(
-		address indexed greetingSetter,
-		string newGreeting,
-		bool premium,
-		uint256 value
-	);
-
-	// Constructor: Called once on contract deployment
-	// Check packages/hardhat/deploy/00_deploy_your_contract.ts
-	constructor(address _owner) {
-		owner = _owner;
+		return recoverSigner(ethSignedMessageHash, signature) == _signer;
 	}
 
-	// Modifier: used to define a set of rules that must be met before or after a function is executed
-	// Check the withdraw() function
-	modifier isOwner() {
-		// msg.sender: predefined variable that represents address of the account that called the current function
-		require(msg.sender == owner, "Not the Owner");
-		_;
+	function getMessageHash(
+		address _to,
+		uint256 _amount,
+		string memory _message,
+		uint256 _nonce
+	) public pure returns (bytes32) {
+		return keccak256(abi.encodePacked(_to, _amount, _message, _nonce));
 	}
 
-	/**
-	 * Function that allows anyone to change the state variable "greeting" of the contract and increase the counters
-	 *
-	 * @param _newGreeting (string memory) - new greeting to save on the contract
-	 */
-	function setGreeting(string memory _newGreeting) public payable {
-		// Print data to the hardhat chain console. Remove when deploying to a live network.
-		console.log(
-			"Setting new greeting '%s' from %s",
-			_newGreeting,
-			msg.sender
-		);
+	function getEthSignedMessageHash(
+		bytes32 _messageHash
+	) public pure returns (bytes32) {
+		/*
+        Signature is produced by signing a keccak256 hash with the following format:
+        "\x19Ethereum Signed Message\n" + len(msg) + msg
+        */
+		return
+			keccak256(
+				abi.encodePacked(
+					"\x19Ethereum Signed Message:\n32",
+					_messageHash
+				)
+			);
+	}
 
-		// Change state variables
-		greeting = _newGreeting;
-		totalCounter += 1;
-		userGreetingCounter[msg.sender] += 1;
+	function recoverSigner(
+		bytes32 _ethSignedMessageHash,
+		bytes memory _signature
+	) public pure returns (address) {
+		(bytes32 r, bytes32 s, uint8 v) = splitSignature(_signature);
 
-		// msg.value: built-in global variable that represents the amount of ether sent with the transaction
-		if (msg.value > 0) {
-			premium = true;
-		} else {
-			premium = false;
+		return ecrecover(_ethSignedMessageHash, v, r, s);
+	}
+
+	function splitSignature(
+		bytes memory sig
+	) public pure returns (bytes32 r, bytes32 s, uint8 v) {
+		require(sig.length == 65, "invalid signature length");
+
+		assembly {
+			/*
+            First 32 bytes stores the length of the signature
+
+            add(sig, 32) = pointer of sig + 32
+            effectively, skips first 32 bytes of signature
+
+            mload(p) loads next 32 bytes starting at the memory address p into memory
+            */
+
+			// first 32 bytes, after the length prefix
+			r := mload(add(sig, 32))
+			// second 32 bytes
+			s := mload(add(sig, 64))
+			// final byte (first byte of the next 32 bytes)
+			v := byte(0, mload(add(sig, 96)))
 		}
 
-		// emit: keyword used to trigger an event
-		emit GreetingChange(msg.sender, _newGreeting, msg.value > 0, msg.value);
+		// implicitly return (r, s, v)
 	}
-
-	/**
-	 * Function that allows the owner to withdraw all the Ether in the contract
-	 * The function can only be called by the owner of the contract as defined by the isOwner modifier
-	 */
-	function withdraw() public isOwner {
-		(bool success, ) = owner.call{ value: address(this).balance }("");
-		require(success, "Failed to send Ether");
-	}
-
-	/**
-	 * Function that allows the contract to receive ETH
-	 */
-	receive() external payable {}
 }
